@@ -46,7 +46,7 @@ def make_image_list():
 
 # train model.
 def train_data(image_list, label_list):
-	X = tf.placeholder(tf.float32, [None, 228, 228, 3])
+	X = tf.placeholder(tf.float32, [None, 227, 227, 3])
 	Y_ = tf.placeholder(tf.float32, [None, 8])
 	lr = tf.placeholder(tf.float32)
 

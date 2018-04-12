@@ -1,3 +1,5 @@
+# based on (models/tutorials/image/cifar10/)
+
 import os
 import re
 
@@ -177,9 +179,7 @@ def loss(logits, labels):
     return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
 def _add_loss_summaries(total_loss):
-  """Add summaries for losses in CIFAR-10 model.
-  Generates moving average for all losses and associated summaries for
-  visualizing the performance of the network.
+  """
   Args:
     total_loss: Total loss from loss().
   Returns:

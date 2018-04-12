@@ -1,72 +1,64 @@
-from PIL import Image
 import tensorflow as tf
-import numpy as np
-import math
+from datetime import datetime
+import time
 
-IMAGE_LOCATION = '/home/lukken/ADIENCE/aligned'
-TXT_LOCATION = '/home/lukken/ADIENCE/Folds/train_val_txt_files_per_fold/test_fold_is_0/age_train.txt'
+import adience
 
-f = open(TXT_LOCATION, 'r')
-index = 0
+FLAGS = tf.app.flags.FLAGS
 
-# make image & label list.
-# output: image_list, label_list
-def make_image_list():
-	global index
-	image_list = []
-	label_list = []
-	for j in range(1, 301):
-	# while True:
-		txt = f.readline()
-		if not txt: break
-		index += 1
-		if index % 1000 is 0:
-			print('index: %s' % str(index))
+tf.app.flags.DEFINE_string('train_dir', './age_train', """directory where to write train.""")
+tf.app.flags.DEFINE_integer('max_steps', 1000000, """Number of batches to run.""")
+tf.app.flags.DEFINE_integer('log_frequency', 10, """how often to log results to the console.""")
+tf.app.flags.DEFINE_boolean('log_device_placement', False, """Whether to log device placement.""")
 
-		filename, label = txt.split(" ")
+def train():
+    with tf.Graph().as_default():
+        global_step = tf.train.get_or_create_global_step()
 
-		# make image list.
-		# crop size: 227 * 227. mirror option needed soon.
-		width = 227
-		height = 227
+    with tf.device('/cpu:0'):
+        images, labels = adience.distored_inputs()
 
-		image = Image.open(IMAGE_LOCATION + '/' + filename)
-		image_mod = image.resize((width, height))
-		image_np = np.array(image_mod, dtype=np.uint8)
-		image_list.append(image_np)
+        logits = adience.inference(images)
 
-		# make label list.
-		label = int(label)
-		label_list.append(label)
+        loss = adience.loss(logits, labels)
 
-	classes = 8
-	# make one-hot vector.
-	label_list = np.eye(classes)[label_list]
+        train_op = adience.train(loss, global_step)
 
-	return np.array(image_list), np.array(label_list)
+        class _LoggerHook(tf.train.SessionRunHook):
+            def begin(self):
+                self._step = -1
+                self._start_time = time.time()
 
-# train model.
-def train_data(image_list, label_list):
-	X = tf.placeholder(tf.float32, [None, 227, 227, 3])
-	Y_ = tf.placeholder(tf.float32, [None, 8])
-	lr = tf.placeholder(tf.float32)
+            def before_run(self, run_context):
+                self._step += 1
+                return tf.train.SessionRunArgs(loss)
 
-	K = 96
-	L = 256
+            def after_run(self, run_context, run_values):
+                if self._step % FLAGS.log_frequency == 0:
+                    current_time = time.time()
+                    duration = current_time - self._start_time
 
-	W1 = tf.Variable(tf.truncated_normal([7, 7, 3, K]))
-	B1 = tf.Variable(tf.ones([K]) / 8)
-	W2 = tf.Variable(tf.truncated_normal([5, 5, 96, L]))
-	B1 = tf.Variable(tf.ones([L]) / 8)
+                    loss_value = run_values.results
+                    examples_per_sec = FLAGS.log_frequency * FLAGS.batch_size / duration
+                    sec_per_batch = float(duration / FLAGS.log_frequency)
 
-	stride = 4
-	relu1 = tf.nn.relu(tf.nn.conv2d(X, W1, strides=[1, stride, stride, 1], padding='SAME') + B1)
-	pool1 = tf.nn.max_pool()
+                    format_str = ('%s: step %d, loss = %.2f (%1.f examples/sec; %.3f ' 'sec/batch)')
+                    print(format_str % (datetime.now(), self._step, loss_value, examples_per_sec, sec_per_batch))
 
+        with tf.train.MonitoredTrainingSession(
+                checkpoint_dir=FLAGS.train_dir,
+                hooks=[tf.train.StopAtStepHook(last_step=FLAGS.max_steps),
+                    tf.train.NanTensorHook(loss),
+                    _LoggerHook()],
+                config=tf.ConfigProto(log_device_placement=FLAGS.log_device_placement)) as mon_sess:
+            while not mon_sess.should_stop():
+                mon_sess.run(train_op)
 
-image_list, label_list = make_image_list()
-print('Image amount: %d' % len(image_list))
-print(np.shape(image_list))
-print('Label amount: %d' % len(label_list))
-print(np.shape(label_list))
-print((label_list[0]))
+def main(argv=None):
+    if tf.gfile.Exists(FLAGS.train_dir):
+        tf.gfile.DeleteRecursively(FLAGS.train_dir)
+    tf.gfile.MakeDirs(FLAGS.train_dir)
+    train()
+
+if __name__ == '__main__':
+    tf.app.run()
